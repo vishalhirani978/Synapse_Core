@@ -35,25 +35,31 @@ def start_agentic_loop(task, max_retries=3):
         time.sleep(1) # Give Windows a second to breathe
 
         # 3. Test it in the Docker Cage
+        # 3. Test it in the Docker Cage
         try:
-            # Command to run the class inside the container
-            # We add /app to sys.path so Docker can see the mounted file
             test_cmd = 'python3 -c "from auto_generated_skill import GeneratedSkill; print(GeneratedSkill().execute())"'
             
-            # We remove the "local_dir=" and "command=" labels so Python just passes the data directly
             output = sandbox.run_in_container(os.path.abspath("skills"), test_cmd)
             
             print("="*30)
             print(f"📦 [CAGE RESULT]:\n{output.strip()}")
             print("="*30)
-            print("🎯 [SUCCESS] The Agentic Loop is complete!")
-            return # Exit loop on success
+
+            # --- DAY 4 LOGIC GATE: VALIDATION ---
+            # We check if the expected answer (55) is actually in the string
+            if "55" in output:
+                print("🎯 [SUCCESS] The Agentic Loop is complete and validated!")
+                return 
+            else:
+                print("⚠️ [LOGIC ERROR] Output received, but 55 was not found. Retrying...")
+                error_feedback = f"The code ran but the answer was wrong. I expected 55, but got: {output}"
+                attempt += 1
+            # ------------------------------------
             
         except Exception as e:
             print(f"❌ [CAGE FAILURE] Error: {e}")
             error_feedback = str(e)
             attempt += 1
-
     print("\n💀 [FATAL] Max retries reached. The AI couldn't fix the code.")
 
 if __name__ == "__main__":

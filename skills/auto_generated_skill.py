@@ -1,16 +1,15 @@
 class BaseSkill:
     def execute(self, **kwargs):
-        pass
+        raise NotImplementedError("Subclasses must implement execute")
 
 class GeneratedSkill(BaseSkill):
     def execute(self, **kwargs):
-        def calculate_fibonacci(n):
-            a, b = 0, 1
-            for _ in range(n):
-                a, b = b, a + b
-            return a
-        
         # Calculating the 10th Fibonacci number (F10)
-        # Sequence: 0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55...
-        fib_10 = calculate_fibonacci(10)
-        return f"The 10th Fibonacci number is {fib_10}."
+        # Sequence: F0=0, F1=1, F2=1, F3=2, F4=3, F5=5, F6=8, F7=13, F8=21, F9=34, F10=55
+        n = 10
+        a, b = 0, 1
+        for _ in range(n):
+            a, b = b, a + b
+        
+        fib_number = a
+        return f"The 10th Fibonacci number is {fib_number}."
