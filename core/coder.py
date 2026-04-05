@@ -18,10 +18,11 @@ Task description:
 {task_description}
 
 Requirements:
-1. The code MUST explicitly define `class BaseSkill:` and its `execute(self, **kwargs)` method inside the generated string. Do NOT try to import it from `core` (no `from core import ...`).
-2. Your skill class MUST be named `GeneratedSkill` and inherit from the `BaseSkill` class you defined.
-3. The `GeneratedSkill` class MUST implement the `execute(self, **kwargs)` method.
-4. You MUST return ONLY the raw Python code. Do not include markdown formatting such as ```python or ``` at the end. Do not include any text explanations. ONLY the raw runnable Python code.
+1. You MUST first generate a 'PLAN' in python comments at the very top of the file. This plan should include: Goal, Logic Steps, and Required Libraries.
+2. The code MUST explicitly define `class BaseSkill:` and its `execute(self, **kwargs)` method inside the generated string. Do NOT try to import it from `core` (no `from core import ...`).
+3. Your skill class MUST be named `GeneratedSkill` and inherit from the `BaseSkill` class you defined.
+4. The `GeneratedSkill` class MUST implement the `execute(self, **kwargs)` method.
+5. You MUST return ONLY the raw Python code. Do not include markdown formatting such as ```python or ``` at the end. Do not include any text explanations. ONLY the raw runnable Python code.
 """
         response = self.model.generate_content(prompt)
         text = response.text
