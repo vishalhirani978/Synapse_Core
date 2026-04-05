@@ -1,8 +1,24 @@
 import os
 import time
 import datetime
+import json
 from core.coder import CoderAgent
 from core.sandbox import SandboxManager
+
+def get_registry_path():
+    return os.path.join("skills", "skills_registry.json")
+
+def load_registry():
+    path = get_registry_path()
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_registry(registry):
+    path = get_registry_path()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(registry, f, indent=4)
 
 def log_session(attempt, result, error=""):
     os.makedirs("logs", exist_ok=True)
@@ -11,28 +27,30 @@ def log_session(attempt, result, error=""):
         f.write(f"[{timestamp}] Attempt: {attempt} | Result: {result} | Error: {error}\n")
 
 def start_agentic_loop(task, max_retries=3):
-    skill_file = "auto_generated_skill.py"
-    skill_path = os.path.join("skills", skill_file)
-    success_flag_path = os.path.join("skills", ".success")
+    os.makedirs("skills", exist_ok=True)
+    registry = load_registry()
+    
+    if task in registry:
+        skill_file = registry[task]
+        skill_path = os.path.join("skills", skill_file)
+        if os.path.exists(skill_path):
+            choice = input(f"A successful auto-generated skill '{skill_file}' already exists for this task. Do you want to reuse it? (y/n): ").strip().lower()
+            if choice == 'y':
+                print(f"🚀 [SYSTEM] Reusing existing successful skill '{skill_file}'. Running in Cage...")
+                sandbox = SandboxManager()
+                try:
+                    module_name = skill_file[:-3] if skill_file.endswith(".py") else skill_file
+                    test_cmd = f'python3 -c "from {module_name} import GeneratedSkill; print(GeneratedSkill().execute())"'
+                    output = sandbox.run_in_container(os.path.abspath("skills"), test_cmd)
+                    print("="*30)
+                    print(f"📦 [CAGE RESULT (Reused)]:\n{output.strip()}")
+                    print("="*30)
+                except Exception as e:
+                    print(f"❌ [CAGE FAILURE] Error: {e}")
+                return
+            else:
+                print("🔄 [SYSTEM] Regenerating skill...")
 
-    if os.path.exists(skill_path) and os.path.exists(success_flag_path):
-        choice = input("A successful auto-generated skill already exists. Do you want to reuse it? (y/n): ").strip().lower()
-        if choice == 'y':
-            print("🚀 [SYSTEM] Reusing existing successful skill. Running in Cage...")
-            sandbox = SandboxManager()
-            try:
-                test_cmd = 'python3 -c "from auto_generated_skill import GeneratedSkill; print(GeneratedSkill().execute())"'
-                output = sandbox.run_in_container(os.path.abspath("skills"), test_cmd)
-                print("="*30)
-                print(f"📦 [CAGE RESULT (Reused)]:\n{output.strip()}")
-                print("="*30)
-            except Exception as e:
-                print(f"❌ [CAGE FAILURE] Error: {e}")
-            return
-        else:
-            print("🔄 [SYSTEM] Regenerating skill...")
-            if os.path.exists(success_flag_path):
-                os.remove(success_flag_path)
     coder = CoderAgent()
     sandbox = SandboxManager()
     
@@ -50,23 +68,22 @@ def start_agentic_loop(task, max_retries=3):
             current_prompt = f"{task}\n\nNOTE: Your previous code failed with this error. Please fix it:\n{error_feedback}"
 
         # 1. Generate the code
-        generated_code = coder.generate_skill(current_prompt)
+        suggested_filename, generated_code = coder.generate_skill(current_prompt)
         
         # 2. Save it to the skills folder
-        os.makedirs("skills", exist_ok=True)
-        skill_file = "auto_generated_skill.py"
+        skill_file = suggested_filename
         skill_path = os.path.join("skills", skill_file)
         
-        with open(skill_path, "w") as f:
+        with open(skill_path, "w", encoding="utf-8") as f:
             f.write(generated_code)
         
         print(f"✅ [SYSTEM] Code saved to {skill_path}. Sending to the Cage...")
         time.sleep(1) # Give Windows a second to breathe
 
         # 3. Test it in the Docker Cage
-        # 3. Test it in the Docker Cage
         try:
-            test_cmd = 'python3 -c "from auto_generated_skill import GeneratedSkill; print(GeneratedSkill().execute())"'
+            module_name = skill_file[:-3] if skill_file.endswith(".py") else skill_file
+            test_cmd = f'python3 -c "from {module_name} import GeneratedSkill; print(GeneratedSkill().execute())"'
             
             output = sandbox.run_in_container(os.path.abspath("skills"), test_cmd)
             
@@ -74,17 +91,20 @@ def start_agentic_loop(task, max_retries=3):
             print(f"📦 [CAGE RESULT]:\n{output.strip()}")
             print("="*30)
 
-            # --- DAY 4 LOGIC GATE: VALIDATION ---
-            # We check if the expected answer (55) is actually in the string
-            if "55" in output:
+            # --- DAY 6 LOGIC GATE: VALIDATION ---
+            # We check if the expected answer (30) is actually in the string
+            if "30" in output:
                 print("🎯 [SUCCESS] The Agentic Loop is complete and validated!")
                 log_session(attempt, "SUCCESS")
-                with open(success_flag_path, "w") as f:
-                    f.write("success")
+                
+                # Add to registry
+                registry[task] = skill_file
+                save_registry(registry)
+                
                 return 
             else:
-                print("⚠️ [LOGIC ERROR] Output received, but 55 was not found. Retrying...")
-                error_feedback = f"The code ran but the answer was wrong. I expected 55, but got: {output}"
+                print("⚠️ [LOGIC ERROR] Output received, but 30 was not found. Retrying...")
+                error_feedback = f"The code ran but the answer was wrong. I expected 30, but got: {output}"
                 log_session(attempt, "LOGIC ERROR", error_feedback)
                 attempt += 1
             # ------------------------------------
