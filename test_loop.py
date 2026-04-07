@@ -3,6 +3,7 @@ import time
 import datetime
 import json
 from core.coder import CoderAgent
+from core.reviewer import ReviewerAgent
 from core.sandbox import SandboxManager
 
 def get_registry_path():
@@ -40,7 +41,7 @@ def find_existing_skill(task):
             return skill_file
     return None
 
-def start_agentic_loop(task, expected_output=None, max_retries=3):
+def start_agentic_loop(task, max_retries=3):
     skills_dir = "skills"
     os.makedirs(skills_dir, exist_ok=True)
     
@@ -84,6 +85,23 @@ def start_agentic_loop(task, expected_output=None, max_retries=3):
         # 1. Generate the code
         suggested_filename, generated_code = coder.generate_skill(current_prompt)
         
+        print(f"🕵️ [REVIEW] Sending code to the ReviewerAgent...")
+        reviewer = ReviewerAgent()
+        review_result = reviewer.review_code(generated_code, task)
+        
+        status = review_result.get("status", "REJECTED")
+        feedback = review_result.get("feedback", "No feedback provided.")
+        
+        log_session(attempt, f"REVIEW {status}", feedback)
+
+        if status == "REJECTED":
+            print(f"🚫 [REVIEW REJECTED] {feedback}")
+            error_feedback = f"Code Review Rejected your code: {feedback}"
+            attempt += 1
+            continue
+
+        print("✅ [REVIEW APPROVED] Proceeding to Sandbox execution...")
+
         # 2. Save it to the skills folder
         skill_file = suggested_filename
         skill_path = os.path.join(skills_dir, skill_file)
@@ -105,13 +123,14 @@ def start_agentic_loop(task, expected_output=None, max_retries=3):
             print(f"📦 [CAGE RESULT]:\n{output.strip()}")
             print("="*30)
 
-            # --- DAY 6 LOGIC GATE: VALIDATION ---
-            is_valid = True
-            if expected_output and expected_output not in output:
-                is_valid = False
+            # --- DYNAMIC VALIDATION ---
+            print(f"🕵️ [QA] Sending output to the ReviewerAgent for dynamic validation...")
+            validation_result = reviewer.verify_result(task, output.strip())
+            val_status = validation_result.get("status", "FAILURE")
+            val_feedback = validation_result.get("feedback", "No feedback provided.")
 
-            if is_valid:
-                print("🎯 [SUCCESS] The Agentic Loop is complete and validated!")
+            if val_status == "SUCCESS":
+                print("🎯 [SUCCESS] The Agentic Loop is complete and validated dynamically!")
                 log_session(attempt, "GENERATED (New) - SUCCESS")
                 
                 # Add to registry
@@ -121,12 +140,11 @@ def start_agentic_loop(task, expected_output=None, max_retries=3):
                 
                 return 
             else:
-                print(f"⚠️ [LOGIC ERROR] Output received, but expected result '{expected_output}' was not found. Retrying...")
-                error_feedback = f"The code ran but the answer was wrong. I expected {expected_output}, but got: {output}"
-                log_session(attempt, "GENERATED (New) - LOGIC ERROR", error_feedback)
+                print(f"⚠️ [LOGIC ERROR] Code executed, but QA rejected it: {val_feedback}")
+                error_feedback = f"The code ran but the QA Reviewer rejected the output. QA Feedback: {val_feedback}"
+                log_session(attempt, "GENERATED (New) - LOGIC ERROR", val_feedback)
                 attempt += 1
-            # ------------------------------------
-            
+            # ------------------------------------            
         except Exception as e:
             print(f"❌ [CAGE FAILURE] Error: {e}")
             error_feedback = str(e)
@@ -137,5 +155,5 @@ def start_agentic_loop(task, expected_output=None, max_retries=3):
 
 if __name__ == "__main__":
     # The ultimate test for a Nawabshah developer!
-    my_task = "Create a skill that finds the square root of 144 and returns the number."
-    start_agentic_loop(my_task, expected_output="30")
+    my_task = "List the prime numbers between 1 and 10"
+    start_agentic_loop(my_task)
