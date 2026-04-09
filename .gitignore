@@ -1,10 +1,13 @@
-# Secrets
+# Secrets (CRITICAL)
 .env
 
-# Python
+# Python junk
 __pycache__/
-*.py[cod]
-.venv/
+*.pyc
 
-# Synapse Specific
-skills/auto_generated_skill.py
+# Docker and OS junk
+.DS_Store
+Thumbs.db
+
+# Large data/logs (optional)
+logs/

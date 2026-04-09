@@ -1,0 +1,15 @@
+# Synapse Core: Workspace Protocol
+
+## Architectural Constraints
+- This is a PLUGIN-BASED system. 
+- Core logic resides in `/core`. 
+- Generated features MUST reside in `/skills`.
+- Every skill MUST inherit from `core.base_skill.BaseSkill`.
+
+## Security & Safety
+- DO NOT execute generated code on the host machine.
+- ALWAYS use the `core.sandbox.SandboxManager` for verification (to be built in Phase 2).
+
+## Formatting
+- Use Type Hints for everything.
+- Maintain a strictly modular directory structure.

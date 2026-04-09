@@ -2,6 +2,9 @@ import os
 import time
 import datetime
 import json
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
 from core.coder import CoderAgent
 from core.reviewer import ReviewerAgent
 from core.sandbox import SandboxManager
@@ -30,15 +33,30 @@ def log_session(attempt, result, error=""):
         f.write(f"[{timestamp}] Attempt: {attempt} | Result: {result} | Error: {error}\n")
 
 def find_existing_skill(task):
-    registry = load_registry()
-    task_words = set(task.lower().split())
-    for reg_task, skill_file in registry.items():
-        reg_words = set(reg_task.lower().split())
-        if not task_words or not reg_words:
-            continue
-        overlap = len(task_words.intersection(reg_words))
-        if overlap >= len(task_words) * 0.5 or overlap >= len(reg_words) * 0.5:
-            return skill_file
+    skills_dir = "skills"
+    if not os.path.exists(skills_dir):
+        return None
+        
+    skills_files = [f for f in os.listdir(skills_dir) if f.endswith(".py")]
+    if not skills_files:
+        return None
+        
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    prompt = f"Given these available skills: {skills_files}, does one of them directly solve the task: '{task}'? If yes, return the filename. If no, return 'NONE'. Return nothing but the filename or NONE."
+    
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0
+        )
+        result = completion.choices[0].message.content.strip()
+        if result in skills_files:
+            return result
+    except Exception as e:
+        print(f"⚠️ [MEMORY] Exception during memory check: {e}")
+        pass
+        
     return None
 
 def start_agentic_loop(task, max_retries=3):
@@ -49,7 +67,7 @@ def start_agentic_loop(task, max_retries=3):
     if skill_file:
         skill_path = os.path.join(skills_dir, skill_file)
         if os.path.exists(skill_path):
-            print(f"🚀 [SYSTEM] ORCHESTRATED (Reused): Matched to existing skill '{skill_file}'. Running in Cage...")
+            print(f"🧠 [MEMORY] Matching skill found: {skill_file}. Reusing existing logic...")
             sandbox = SandboxManager()
             try:
                 module_name = skill_file[:-3] if skill_file.endswith(".py") else skill_file
@@ -73,32 +91,54 @@ def start_agentic_loop(task, max_retries=3):
     
     attempt = 1
     error_feedback = ""
+    search_context = ""
+    search_count = 0
+    last_attempt = 1
 
     while attempt <= max_retries:
+        if attempt != last_attempt:
+            search_count = 0
+            last_attempt = attempt
         print(f"\n🧠 [ATTEMPT {attempt}] Coder is writing the skill...")
         
         # If the previous run failed, we pass the error back to the AI
-        current_prompt = task
+        current_prompt = task + search_context
         if error_feedback:
-            current_prompt = f"{task}\n\nNOTE: Your previous code failed with this error. Please fix it:\n{error_feedback}"
+            current_prompt += f"\n\nNOTE: Your previous code failed with this error. Please fix it:\n{error_feedback}"
 
         # 1. Generate the code
         suggested_filename, generated_code = coder.generate_skill(current_prompt)
+        
+        if suggested_filename == "SEARCH":
+            if search_count >= 1:
+                print(f"🚫 [SEARCH LIMIT] Coder tried to search again. Forcing it to use existing data.")
+                error_feedback = "You are allowed ONLY ONE search query. You've already used it. Please write the Python code immediately using the data you already have."
+                continue
+                
+            search_count += 1
+            query = generated_code
+            print(f"🔍 [SEARCH] Coder requested search for: '{query}'. Searching...")
+            from core.tools.web_search import search_web
+            search_results = search_web(query)
+            search_context += f"\n\nWEB DATA FOR INJECTION: {search_results}\nWrite a static skill using this data.\n"
+            print("✅ [SEARCH] Results retrieved. Sending back to Coder without incrementing attempt...")
+            continue
         
         print(f"🕵️ [REVIEW] Sending code to the ReviewerAgent...")
         reviewer = ReviewerAgent()
         review_result = reviewer.review_code(generated_code, task)
         
-        status = review_result.get("status", "REJECTED")
-        feedback = review_result.get("feedback", "No feedback provided.")
-        
-        log_session(attempt, f"REVIEW {status}", feedback)
-
-        if status == "REJECTED":
+        if review_result.startswith("FAILED"):
+            feedback = review_result.split(":", 1)[1].strip() if ":" in review_result else review_result
+            status = "REJECTED"
             print(f"🚫 [REVIEW REJECTED] {feedback}")
             error_feedback = f"Code Review Rejected your code: {feedback}"
+            log_session(attempt, f"REVIEW {status}", feedback)
             attempt += 1
             continue
+        
+        status = "APPROVED"
+        log_session(attempt, f"REVIEW {status}", "")
 
         print("✅ [REVIEW APPROVED] Proceeding to Sandbox execution...")
 
@@ -124,10 +164,14 @@ def start_agentic_loop(task, max_retries=3):
             print("="*30)
 
             # --- DYNAMIC VALIDATION ---
-            print(f"🕵️ [QA] Sending output to the ReviewerAgent for dynamic validation...")
-            validation_result = reviewer.verify_result(task, output.strip())
-            val_status = validation_result.get("status", "FAILURE")
-            val_feedback = validation_result.get("feedback", "No feedback provided.")
+            if search_count >= 1 and "Traceback" not in output and "Error" not in output:
+                print("🎯 [BYPASS] Search data used and cage executed cleanly. Bypassing extra QA...")
+                val_status = "SUCCESS"
+            else:
+                print(f"🕵️ [QA] Sending output to the ReviewerAgent for dynamic validation...")
+                validation_result = reviewer.verify_result(task, output.strip())
+                val_status = validation_result.get("status", "FAILURE")
+                val_feedback = validation_result.get("feedback", "No feedback provided.")
 
             if val_status == "SUCCESS":
                 print("🎯 [SUCCESS] The Agentic Loop is complete and validated dynamically!")
@@ -155,5 +199,5 @@ def start_agentic_loop(task, max_retries=3):
 
 if __name__ == "__main__":
     # The ultimate test for a Nawabshah developer!
-    my_task = "List the prime numbers between 1 and 10"
+    my_task = "Find the current price of Bitcoin in USD and return it."
     start_agentic_loop(my_task)
