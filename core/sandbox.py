@@ -4,12 +4,15 @@ import os
 class SandboxManager:
     def __init__(self) -> None:
         """Initialize the Docker client from the environment."""
+        self.client = None
         try:
             self.client = docker.from_env()
         except Exception as e:
             print(f"❌ Docker Error: Make sure Docker Desktop is running! {e}")
 
     def run_in_container(self, local_dir: str, command: str) -> str:
+        if not self.client:
+            raise RuntimeError("Docker client is not initialized. Please ensure Docker is running.")
         """
         Runs a command inside a python:3.11-slim Docker container.
         
@@ -20,14 +23,14 @@ class SandboxManager:
         Returns:
             str: The output from the container.
         """
-        image_name = "python:3.11-slim"
-        
+        image_name = "synapse-cage:latest"
+
         # 1. Ensure the image is available
         try:
             self.client.images.get(image_name)
         except docker.errors.ImageNotFound:
-            print(f"🐳 Pulling {image_name}... please wait.")
-            self.client.images.pull(image_name)
+            print(f"🐳 Image '{image_name}' not found. Please run: docker build -t synapse-cage:latest .")
+            raise RuntimeError(f"Image '{image_name}' not found. Build it first with: docker build -t synapse-cage:latest .")
             
         # 2. Execute the command
         # We pass the command directly as a string to allow python -c flags

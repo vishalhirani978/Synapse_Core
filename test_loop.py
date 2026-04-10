@@ -1,28 +1,21 @@
 import os
+import sys
 import time
 import datetime
 import json
 from groq import Groq
 from dotenv import load_dotenv
+
+# Ensure stdout can handle emojis without throwing UnicodeEncodeError
+sys.stdout.reconfigure(encoding='utf-8')
+
 load_dotenv()
 from core.coder import CoderAgent
 from core.reviewer import ReviewerAgent
 from core.sandbox import SandboxManager
+from core.tools.file_manager import read_local_file, write_local_file
+from core.tools.web_search import search_web
 
-def get_registry_path():
-    return os.path.join("skills", "skills_registry.json")
-
-def load_registry():
-    path = get_registry_path()
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_registry(registry):
-    path = get_registry_path()
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(registry, f, indent=4)
 
 def log_session(attempt, result, error=""):
     log_dir = "logs"
@@ -32,17 +25,17 @@ def log_session(attempt, result, error=""):
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] Attempt: {attempt} | Result: {result} | Error: {error}\n")
 
-def find_existing_skill(task):
+def find_existing_skill(user_task):
     skills_dir = "skills"
     if not os.path.exists(skills_dir):
-        return None
+        return "NONE"
         
     skills_files = [f for f in os.listdir(skills_dir) if f.endswith(".py")]
     if not skills_files:
-        return None
+        return "NONE"
         
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-    prompt = f"Given these available skills: {skills_files}, does one of them directly solve the task: '{task}'? If yes, return the filename. If no, return 'NONE'. Return nothing but the filename or NONE."
+    prompt = f"You are the Synapse Core Librarian. Given the task [{user_task}] and these scripts [{skills_files}], return ONLY the filename if a match exists, or \"NONE\"."
     
     try:
         completion = client.chat.completions.create(
@@ -51,23 +44,80 @@ def find_existing_skill(task):
             temperature=0.0
         )
         result = completion.choices[0].message.content.strip()
+        # Some models might still return quotes or a path, clean it up
+        result = result.strip("'\"")
         if result in skills_files:
             return result
+        return "NONE"
     except Exception as e:
         print(f"⚠️ [MEMORY] Exception during memory check: {e}")
-        pass
-        
-    return None
+        return "NONE"
 
 def start_agentic_loop(task, max_retries=3):
     skills_dir = "skills"
     os.makedirs(skills_dir, exist_ok=True)
     
+    # --- PART 3: THE INTEGRATED DISPATCHER ---
+    
+    # 1. THE META-PATH (Self-Analysis)
+    # Check if the user wants to explain/analyze a project file
+    meta_prompt = f"You are the Synapse Core Meta-Analyst. Determine if the following task is asking to 'read', 'explain', or 'analyze' a specific project file: [{task}]. If yes, return ONLY the filepath of that file (no extra text, no reasoning). If no, return NONE."
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": meta_prompt}],
+            temperature=0.0
+        )
+        meta_result = completion.choices[0].message.content.strip().strip("'\"")
+        
+        # Stricter cleaning of LLM output
+        if "\n" in meta_result: meta_result = meta_result.split("\n")[0].strip()
+        if ":" in meta_result and not (meta_result.startswith("/") or meta_result[1:3] == ":\\"): 
+             # Catch things like "Filepath is: core/coder.py"
+             meta_result = meta_result.split(":")[-1].strip()
+
+        if meta_result != "NONE":
+            print(f"📂 [FILE SYSTEM] Meta-Path triggered for: {meta_result}")
+            content = read_local_file(meta_result)
+            
+            if content == "Access Denied":
+                print(f"🚫 [SECURITY] Access Denied to file: {meta_result}")
+                log_session("N/A", "META-PATH REJECTED", f"Security violation for {meta_result}")
+                return # Exit early on security violation
+            
+            if content.startswith("Error reading file:"):
+                print(f"❌ [FILE SYSTEM] {content}")
+                # Let it fall through to regular loops if it's just a read error
+            else:
+                print(f"✅ [FILE SYSTEM] File read successfully. Providing LLM explanation...")
+                explain_prompt = f"As the Synapse Core Expert, explain the following code from '{meta_result}' in the context of the task '{task}':\n\n{content}"
+                # Use Gemini for explanation if possible, fallback to Groq
+                try:
+                    coder = CoderAgent()
+                    response = coder.model.generate_content(explain_prompt)
+                    explanation = response.text
+                except Exception:
+                    completion = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": explain_prompt}]
+                    )
+                    explanation = completion.choices[0].message.content
+                
+                print("="*30)
+                print(f"🤖 [META-ANALYSIS RESULT]:\n{explanation.strip()}")
+                print("="*30)
+                log_session("N/A", "META-PATH SUCCESS", f"Analyzed {meta_result}")
+                return
+    except Exception as e:
+        print(f"⚠️ [META-PATH] Exception during check: {e}")
+
+    # 2. THE MEMORY-PATH (Efficiency)
     skill_file = find_existing_skill(task)
-    if skill_file:
+    if skill_file != "NONE":
         skill_path = os.path.join(skills_dir, skill_file)
         if os.path.exists(skill_path):
-            print(f"🧠 [MEMORY] Matching skill found: {skill_file}. Reusing existing logic...")
+            print(f"🔍 [MEMORY] Match found: {skill_file}. Bypassing Coder...")
             sandbox = SandboxManager()
             try:
                 module_name = skill_file[:-3] if skill_file.endswith(".py") else skill_file
@@ -82,7 +132,8 @@ def start_agentic_loop(task, max_retries=3):
                 print(f"❌ [CAGE FAILURE] Error running reused skill: {e}")
                 log_session("N/A", "ORCHESTRATED FAILURE", str(e))
 
-    print("🔄 [SYSTEM] No matching skill found. Proceeding with Agentic Loop...")
+    # 3. THE CREATION-PATH (Agentic Loop)
+    print("🔄 [DISPATCHER] No Meta or Memory match. Initializing Agentic Loop...")
 
     coder = CoderAgent()
     sandbox = SandboxManager()
@@ -118,11 +169,52 @@ def start_agentic_loop(task, max_retries=3):
             search_count += 1
             query = generated_code
             print(f"🔍 [SEARCH] Coder requested search for: '{query}'. Searching...")
-            from core.tools.web_search import search_web
             search_results = search_web(query)
             search_context += f"\n\nWEB DATA FOR INJECTION: {search_results}\nWrite a static skill using this data.\n"
             print("✅ [SEARCH] Results retrieved. Sending back to Coder without incrementing attempt...")
             continue
+            
+        elif suggested_filename == "READ":
+            filepath = generated_code.strip()
+            print(f"📄 [READ] Coder requested to read file: '{filepath}'")
+            try:
+                content = read_local_file(filepath)
+                print(f"✅ [READ] File '{filepath}' retrieved. Asking LLM for explanation...")
+                explain_prompt = f"Given the user task: '{task}', analyze and explain the following file content from '{filepath}':\n\n{content}"
+                try:
+                    response_text = coder.model.generate_content(explain_prompt).text
+                except Exception as ex:
+                    client_inner = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+                    completion = client_inner.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": explain_prompt}]
+                    )
+                    response_text = completion.choices[0].message.content
+                print("="*30)
+                print(f"🤖 [EXPLANATION (Bypassing Cage)]:\n{response_text.strip()}")
+                print("="*30)
+                log_session(attempt, "READ & EXPLAIN SUCCESS")
+                return
+            except Exception as e:
+                print(f"❌ [READ FAILURE] Error reading file: {e}")
+                error_feedback = f"Failed to read local file '{filepath}': {e}"
+                attempt += 1
+                continue
+                
+        elif suggested_filename.startswith("WRITE:"):
+            filepath = suggested_filename.split(":", 1)[1].strip()
+            code_content = generated_code.strip()
+            print(f"💾 [WRITE] Coder requested to write to file: '{filepath}'")
+            try:
+                write_local_file(filepath, code_content)
+                print(f"✅ [WRITE] File '{filepath}' successfully saved! Bypassing Cage.")
+                log_session(attempt, "WRITE SUCCESS")
+                return
+            except Exception as e:
+                print(f"❌ [WRITE FAILURE] Error writing file: {e}")
+                error_feedback = f"Failed to write local file '{filepath}': {e}"
+                attempt += 1
+                continue
         
         print(f"🕵️ [REVIEW] Sending code to the ReviewerAgent...")
         reviewer = ReviewerAgent()
@@ -177,11 +269,6 @@ def start_agentic_loop(task, max_retries=3):
                 print("🎯 [SUCCESS] The Agentic Loop is complete and validated dynamically!")
                 log_session(attempt, "GENERATED (New) - SUCCESS")
                 
-                # Add to registry
-                registry = load_registry()
-                registry[task] = skill_file
-                save_registry(registry)
-                
                 return 
             else:
                 print(f"⚠️ [LOGIC ERROR] Code executed, but QA rejected it: {val_feedback}")
@@ -196,8 +283,9 @@ def start_agentic_loop(task, max_retries=3):
             attempt += 1
     print("\n💀 [FATAL] Max retries reached. The AI couldn't fix the code.")
     log_session(max_retries, "FATAL", "Max retries reached")
+    
 
 if __name__ == "__main__":
-    # The ultimate test for a Nawabshah developer!
-    my_task = "Find the current price of Bitcoin in USD and return it."
+    my_task = "Write a skill called bitcoin_price_skill.py that uses the requests library to fetch the live Bitcoin price in USD from the CoinGecko API. Ensure it prints only the numeric price"
     start_agentic_loop(my_task)
+    

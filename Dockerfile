@@ -1,11 +1,15 @@
-# Use a lightweight Python image
+# Use a slim Python image for efficiency on your local machine
 FROM python:3.11-slim
 
 # Set the working directory inside the container
 WORKDIR /app
 
-# (Optional) Install requests just in case we ever need it later
-RUN pip install requests
+# Install necessary libraries for the "Cage"
+# We add 'requests' here so the agent can fetch live data
+RUN pip install --no-cache-dir requests
 
-# This container will just stay open or run the scripts we send it
+# Copy the current directory contents into the container
+COPY . /app
+
+# Ensure the container stays open or runs the script passed by the dispatcher
 CMD ["python"]

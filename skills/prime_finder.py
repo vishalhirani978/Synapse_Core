@@ -1,42 +1,43 @@
 # FILENAME: prime_finder.py
 
-# PLAN
-# Goal: List the prime numbers between 1 and 10.
+# PLAN:
+# Goal: Find prime numbers up to 100.
 # Logic Steps:
-# 1. Initialize an empty list called `primes` to store the results.
-# 2. Iterate through each number `n` starting from 2 up to 10 (inclusive). Note: 1 is not a prime number.
-# 3. For each number `n`, check if it is divisible by any integer between 2 and the square root of `n`.
-# 4. If no divisors are found, the number is prime; append it to the `primes` list.
-# 5. Return the list of primes.
-# Required Libraries: None.
+# 1. Iterate through numbers starting from 2 up to 100.
+# 2. For each number, check if it is prime by testing divisibility from 2 up to the square root of the number.
+# 3. Store numbers that pass the primality test.
+# 4. Return the list of prime numbers.
+# Required Libraries: math
 
 class BaseSkill:
     def execute(self, **kwargs):
-        """Execute the skill."""
-        raise NotImplementedError("The execute method must be implemented by subclasses.")
+        pass
 
 class GeneratedSkill(BaseSkill):
     def execute(self, **kwargs):
-        """
-        Finds prime numbers between 1 and 10.
+        import math
         
-        Returns:
-            list: A list of prime numbers [2, 3, 5, 7].
-        """
+        limit = 100
         primes = []
-        # Primes start at 2; iterate from 2 up to 10
-        for num in range(2, 11):
+        
+        for num in range(2, limit + 1):
             is_prime = True
-            # Check for divisors from 2 up to the square root of num
-            for i in range(2, int(num**0.5) + 1):
+            # Optimization: check up to sqrt(num)
+            for i in range(2, int(math.sqrt(num)) + 1):
                 if num % i == 0:
                     is_prime = False
                     break
             if is_prime:
                 primes.append(num)
-        return primes
+        
+        print(f"Prime numbers up to {limit}:")
+        print(primes)
+        
+        return {
+            "primes": primes,
+            "count": len(primes)
+        }
 
-# Example of usage:
-# if __name__ == "__main__":
-#     skill = GeneratedSkill()
-#     print(skill.execute())
+if __name__ == "__main__":
+    skill = GeneratedSkill()
+    skill.execute()

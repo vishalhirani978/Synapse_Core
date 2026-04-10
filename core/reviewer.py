@@ -15,8 +15,22 @@ class ReviewerAgent:
         self.model = genai.GenerativeModel(model_name)
 
     def review_code(self, code: str, task: str) -> str:
-        if "import requests" in code or "import urllib" in code:
-            return "FAILED: Network calls are forbidden. Hardcode the values from the search results instead."
+        # Allow requests/urllib ONLY when the task explicitly requires live data from
+        # a reputable public API. Blanket blocking was preventing valid Live skills.
+        REPUTABLE_APIS = [
+            "coingecko.com", "api.coinbase.com", "api.binance.com",
+            "openweathermap.org", "api.github.com", "jsonplaceholder.typicode.com",
+            "restcountries.com", "pokeapi.co", "api.frankfurter.app",
+        ]
+        uses_network = (
+            "import requests" in code or
+            "import urllib.request" in code or
+            "import urllib" in code
+        )
+        targets_reputable = any(api in code for api in REPUTABLE_APIS)
+
+        if uses_network and not targets_reputable:
+            return "FAILED: Network calls are only allowed when targeting a reputable public API. Either hardcode the data or use an approved public endpoint."
 
         prompt = f"""You are a Senior Security Engineer and Expert Python Reviewer.
 Your task is to review the following Python code that was generated to solve a specific task.
@@ -24,7 +38,9 @@ You must strictly return a pure string.
 If the code is safe, logical, and correctly addresses the task without obvious security issues or critical logic flaws, return EXACTLY: "PASSED".
 If the code has security risks, unsafe OS commands, or fails to logically address the task cleanly, return EXACTLY: "FAILED: [Reason]".
 
-You must ACCEPT skills that return hardcoded/static values if they were derived from the 'WEB DATA FOR INJECTION' search results. Since the execution sandbox is offline, hardcoding the latest search result is the ONLY way to fulfill the task. Do NOT demand API calls or external libraries like requests.
+You must ACCEPT skills that use the `requests` library when the task requires live data and the API endpoint is a well-known public API (e.g., CoinGecko, OpenWeatherMap). Do NOT reject these.
+You must ACCEPT skills that return hardcoded/static values if they were derived from the 'WEB DATA FOR INJECTION' search results.
+The execute() method MUST use `return` (not `print`) to pass the value back to the dispatcher.
 
 Task:
 {task}
